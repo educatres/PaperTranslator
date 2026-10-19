@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Copy, Languages, LocateFixed, RefreshCw, X } from "lucide-react";
 import { currentConfig, makeJob, runJob, validResult } from "../lib/tasks";
 import { providerName } from "../lib/providers";
@@ -34,6 +34,78 @@ export function TranslationPopover({
       ["paused", "partial", "failed"].includes(job.status) &&
       job.blockIds.length === 1,
     config = resumable ? job.config : currentConfig();
+  useLayoutEffect(() => {
+    const panel = ref.current!,
+      reader = panel.closest<HTMLElement>(".reader");
+    if (!reader) return;
+    let frame = 0;
+    const place = () => {
+      if (matchMedia("(max-width: 700px)").matches) {
+        panel.style.removeProperty("left");
+        panel.style.removeProperty("right");
+        panel.style.removeProperty("top");
+        return;
+      }
+      const marker = reader.querySelector<HTMLElement>(
+        `[data-marker="${block.id}"]`,
+      );
+      if (!marker?.getClientRects().length) return;
+      const bounds = reader.getBoundingClientRect(),
+        anchor = marker.getBoundingClientRect();
+      const width = panel.offsetWidth,
+        height = panel.offsetHeight,
+        gap = 12,
+        margin = 8,
+        top = 58;
+      const x = anchor.left - bounds.left,
+        y = anchor.top - bounds.top;
+      const clampX = (value: number) =>
+        Math.max(margin, Math.min(value, bounds.width - width - margin));
+      const clampY = (value: number) =>
+        Math.max(top, Math.min(value, bounds.height - height - margin));
+      const candidates = [
+        { left: x + anchor.width + gap, top: clampY(y) },
+        { left: x - width - gap, top: clampY(y) },
+        { left: clampX(x), top: y + anchor.height + gap },
+        { left: clampX(x), top: y - height - gap },
+      ];
+      const target = candidates.find(
+        (p) =>
+          p.left >= margin &&
+          p.top >= top &&
+          p.left + width <= bounds.width - margin &&
+          p.top + height <= bounds.height - margin,
+      ) || {
+        left: clampX(
+          x > bounds.width / 2 ? x - width - gap : x + anchor.width + gap,
+        ),
+        top: clampY(y),
+      };
+      panel.style.left = `${target.left}px`;
+      panel.style.top = `${target.top}px`;
+      panel.style.right = "auto";
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
+    };
+    place();
+    const resize = new ResizeObserver(schedule);
+    resize.observe(reader);
+    resize.observe(panel);
+    const changes = new MutationObserver(schedule);
+    const pages = reader.querySelector(".pdf-scroll");
+    if (pages) changes.observe(pages, { childList: true, subtree: true });
+    reader.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      changes.disconnect();
+      reader.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [block.id]);
   useEffect(() => {
     if (!pinned) return;
     const listener = (e: KeyboardEvent) => {
