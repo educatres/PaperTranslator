@@ -1,4 +1,21 @@
 import type { PageLayout, Quad } from "../types";
+export function unprojectPoint(
+  point: [number, number],
+  layout: Pick<PageLayout, "width" | "height" | "transform">,
+  display: number[],
+): [number, number] {
+  const [a, b, c, d, e, f] = display,
+    det = a * d - b * c;
+  const x = point[0] - e,
+    y = point[1] - f;
+  const px = (d * x - c * y) / det,
+    py = (-b * x + a * y) / det;
+  const t = layout.transform;
+  return [
+    Math.max(0, Math.min(1, (t[0] * px + t[2] * py + t[4]) / layout.width)),
+    Math.max(0, Math.min(1, (t[1] * px + t[3] * py + t[5]) / layout.height)),
+  ];
+}
 export function projectPoint(
   point: [number, number],
   layout: Pick<PageLayout, "width" | "height" | "transform">,

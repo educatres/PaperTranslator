@@ -10,6 +10,7 @@ import {
   type TranslationPart,
   type TranslationResult,
   type Workspace,
+  type Annotation,
 } from "../types";
 import { generate, hasKey, providerName } from "./providers";
 import { mutate, pref, refresh, toast, useApp } from "./storage";
@@ -84,6 +85,118 @@ const summaryInstruction =
 let controller: AbortController | undefined;
 export function pauseTask() {
   controller?.abort();
+}
+export async function runAnnotation(id: string) {
+  const state = useApp.getState(),
+    epoch = state.workspace.epoch;
+  if (state.runningId || state.unsavedDraft) {
+    toast("請先完成目前任務，或匯出未保存的結果。");
+    return;
+  }
+  if (!navigator.locks) {
+    toast("請使用支援執行鎖的新版瀏覽器。");
+    return;
+  }
+  try {
+    await navigator.locks.request(
+      `${NS}.generation`,
+      { ifAvailable: true },
+      async (lock) => {
+        if (!lock)
+          throw new Error("另一個視窗正在生成或還原研究，請稍後再試。");
+        await refresh();
+        const a = useApp
+          .getState()
+          .workspace.annotations.find((a) => a.id === id);
+        if (!a || useApp.getState().workspace.epoch !== epoch)
+          throw new Error("標註或研究已變更。");
+        if (
+          !["translation", "summary"].includes(a.kind) ||
+          !a.quote.trim() ||
+          a.quote.length > REQUEST_LIMIT
+        )
+          throw new Error("請選取 6,000 字元以內的原文。");
+        if (a.results.length >= 1000)
+          throw new Error("此標註已達生成版本上限，請建立新標註。");
+        const config = currentConfig();
+        if (!hasKey(config.provider) || !config.model) {
+          useApp.setState({ settingsOpen: true });
+          throw new Error(
+            "請先在 AI 設定輸入金鑰並選擇模型，再從標註卡片開始生成。",
+          );
+        }
+        const abort = new AbortController();
+        controller = abort;
+        useApp.setState({ runningId: `annotation:${id}` });
+        const save = async (patch: Partial<Annotation>) => {
+          const apply = (w: Workspace) => {
+            const target = w.annotations.find(
+              (b) =>
+                b.id === id &&
+                b.sourceHash === a.sourceHash &&
+                b.documentHash === a.documentHash,
+            );
+            if (!target) throw new Error("標註來源已變更。");
+            Object.assign(target, patch, { updatedAt: now() });
+          };
+          try {
+            await mutate(apply, epoch);
+          } catch (e) {
+            const current = useApp.getState();
+            if (
+              current.saveError &&
+              current.workspace.epoch === epoch &&
+              current.workspace.annotations.some((b) => b.id === id)
+            ) {
+              const draft = structuredClone(
+                current.unsavedDraft || current.workspace,
+              );
+              apply(draft);
+              useApp.setState({ workspace: draft, unsavedDraft: draft });
+            }
+            throw e;
+          }
+        };
+        try {
+          await save({ status: "running", config, error: undefined });
+          const result = await generate(
+            config.provider,
+            config.model,
+            a.kind === "translation"
+              ? translationInstruction
+              : "僅針對使用者選取的原文，以繁體中文條列摘要重要論點、方法、數據與限制。保留數值與引用；不要補入未提供的全文結論。只輸出摘要。",
+            a.quote,
+            abort.signal,
+            config.reasoningEffort,
+          );
+          if (abort.signal.aborted)
+            throw new Error("已暫停，可從標註卡片重試。");
+          await save({
+            status: "complete",
+            results: [...a.results, result],
+            error: undefined,
+          });
+        } catch (e) {
+          try {
+            await save({
+              status:
+                abort.signal.aborted || useApp.getState().unsavedDraft
+                  ? "paused"
+                  : "failed",
+              error: (e as Error).message,
+            });
+          } catch {
+            toast("保存失敗，請保留分頁並匯出備份。");
+          }
+        } finally {
+          controller = undefined;
+          useApp.setState({ runningId: undefined });
+        }
+      },
+    );
+  } catch (e) {
+    toast((e as Error).message);
+  }
 }
 window.addEventListener("pagehide", pauseTask);
 window.addEventListener(`${NS}.reset`, pauseTask);

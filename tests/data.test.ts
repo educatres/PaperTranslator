@@ -157,3 +157,77 @@ it("commits progress atomically and prevents stale epoch writes", async () => {
     "Committed title",
   );
 });
+it("upgrades v1 research without changing paragraph IDs and rejects annotation corruption", async () => {
+  const w = await fixture();
+  const legacy: Record<string, unknown> = { ...w, schemaVersion: 1 };
+  delete legacy.annotations;
+  const migrated = await validateWorkspace(legacy);
+  expect(migrated.schemaVersion).toBe(2);
+  expect(migrated.annotations).toEqual([]);
+  expect(migrated.blocks).toEqual(w.blocks);
+  const { sha256 } = await import("../src/lib/hash");
+  w.annotations.push({
+    id: "annotation",
+    documentId: "doc",
+    documentHash: w.documents[0].sha256,
+    kind: "note",
+    color: "pink",
+    anchors: [{ pageIndex: 0, quads: [w.blocks[0].lines[0].quad] }],
+    quote: "source",
+    sourceHash: await sha256("source"),
+    content: "我的便條",
+    results: [],
+    status: "idle",
+    createdAt: now(),
+    updatedAt: now(),
+  });
+  await expect(validateWorkspace(w)).resolves.toMatchObject({
+    annotations: [{ content: "我的便條" }],
+  });
+  for (const patch of [
+    { documentId: "missing" },
+    { sourceHash: "c".repeat(64) },
+    { color: "red" },
+    { anchors: [{ pageIndex: 7, quads: [w.blocks[0].lines[0].quad] }] },
+    { status: "complete" },
+  ]) {
+    await expect(
+      validateWorkspace({
+        ...w,
+        annotations: [{ ...w.annotations[0], ...patch }],
+      }),
+    ).rejects.toThrow();
+  }
+});
+it("exports running selection generation as paused and preserves its successful history", async () => {
+  const w = await fixture(),
+    { sha256 } = await import("../src/lib/hash");
+  w.annotations.push({
+    id: "a",
+    documentId: "doc",
+    documentHash: w.documents[0].sha256,
+    kind: "translation",
+    color: "blue",
+    anchors: [{ pageIndex: 0, quads: [w.blocks[0].lines[0].quad] }],
+    quote: "source",
+    sourceHash: await sha256("source"),
+    content: "",
+    status: "running",
+    config: { provider: "openai", model: "test-model" },
+    results: [
+      {
+        provider: "openai",
+        model: "test-model",
+        text: "先前譯文",
+        createdAt: now(),
+      },
+    ],
+    createdAt: now(),
+    updatedAt: now(),
+  });
+  const snapshot = pausedSnapshot(w);
+  expect(snapshot.annotations[0].status).toBe("paused");
+  expect(snapshot.annotations[0].results[0].text).toBe("先前譯文");
+  expect(w.annotations[0].status).toBe("running");
+  await expect(validateWorkspace(snapshot)).resolves.toBeDefined();
+});

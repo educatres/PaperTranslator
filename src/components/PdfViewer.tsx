@@ -19,14 +19,33 @@ import {
   Check,
   Languages,
   CircleAlert,
+  Highlighter,
+  StickyNote,
+  NotebookPen,
+  Sparkles,
 } from "lucide-react";
 import "pdfjs-dist/web/pdf_viewer.css";
-import { NS, type PageLayout, type TranslationBlock } from "../types";
+import {
+  NS,
+  type PageLayout,
+  type TranslationBlock,
+  type Annotation,
+  type AnnotationColor,
+  type Quad,
+} from "../types";
 import { openPaper } from "../lib/pdf";
-import { useApp } from "../lib/storage";
-import { projectQuad } from "../lib/geometry";
-import { validResult } from "../lib/tasks";
+import { toast, useApp } from "../lib/storage";
+import { projectQuad, unprojectPoint } from "../lib/geometry";
+import { runAnnotation, validResult } from "../lib/tasks";
 import { TranslationPopover } from "./TranslationPopover";
+import {
+  addAnnotation,
+  annotationColors,
+  annotationLabels,
+  captureTextSelection,
+  type TextSelection,
+} from "../lib/annotations";
+import { AnnotationsPanel } from "./AnnotationsPanel";
 
 function PdfPage({
   pdf,
@@ -43,6 +62,7 @@ function PdfPage({
   open,
   preview,
   leave,
+  openAnnotation,
 }: {
   pdf: PDFDocumentProxy;
   index: number;
@@ -58,6 +78,7 @@ function PdfPage({
   open: (id: string) => void;
   preview: (id: string) => void;
   leave: () => void;
+  openAnnotation: (id: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null),
     canvasRef = useRef<HTMLCanvasElement>(null),
@@ -194,6 +215,7 @@ function PdfPage({
       ref={ref}
       className={`pdf-page ${ready ? "ready" : ""}`}
       data-page-index={index}
+      data-viewport={geometry ? JSON.stringify(geometry.transform) : undefined}
       style={{ width, height: geometry?.height || width * ratio }}
     >
       {visible ? (
@@ -208,6 +230,58 @@ function PdfPage({
       )}
       {ready && layout && geometry && (
         <div className="annotation-layer">
+          {w.annotations
+            .filter((a) => a.documentId === layout.documentId)
+            .flatMap((a) =>
+              a.anchors
+                .filter((anchor) => anchor.pageIndex === index)
+                .flatMap((anchor) =>
+                  anchor.quads.map((quad, i) => (
+                    <div
+                      key={`${a.id}-${i}`}
+                      className={`manual-highlight annotation-${a.color}`}
+                      data-highlight={a.id}
+                      style={projectQuad(quad, layout, geometry.transform)}
+                    />
+                  )),
+                ),
+            )}
+          {w.annotations
+            .filter((a) => a.documentId === layout.documentId)
+            .flatMap((a) =>
+              a.anchors
+                .filter((anchor) => anchor.pageIndex === index)
+                .map((anchor) => {
+                  const box = projectQuad(
+                    anchor.quads[0],
+                    layout,
+                    geometry.transform,
+                  );
+                  return (
+                    <button
+                      key={a.id}
+                      data-annotation-pin={a.id}
+                      className={`user-annotation-pin annotation-${a.color}`}
+                      aria-label={`${annotationLabels[a.kind]}，第 ${index + 1} 頁`}
+                      style={{
+                        left: Math.max(12, box.left - 14),
+                        top: box.top + box.height / 2,
+                      }}
+                      onClick={() => openAnnotation(a.id)}
+                    >
+                      {a.kind === "highlight" ? (
+                        <Highlighter size={12} />
+                      ) : a.kind === "note" ? (
+                        <StickyNote size={12} />
+                      ) : a.kind === "translation" ? (
+                        <Languages size={12} />
+                      ) : (
+                        <Sparkles size={12} />
+                      )}
+                    </button>
+                  );
+                }),
+            )}
           {blocks
             .filter(
               (b) =>
@@ -318,6 +392,14 @@ export function PdfViewer({
     [search, setSearch] = useState(false),
     [hit, setHit] = useState(0),
     [pageInput, setPageInput] = useState("1");
+  const [pen, setPen] = useState(false),
+    [color, setColor] = useState<AnnotationColor>("yellow"),
+    [noteMode, setNoteMode] = useState(false),
+    [notesOpen, setNotesOpen] = useState(false),
+    [annotationId, setAnnotationId] = useState<string>(),
+    [textSelection, setTextSelection] = useState<TextSelection>(),
+    [adding, setAdding] = useState(false);
+  const addingRef = useRef(false);
   const [selection, setSelection] = useState<{ id: string; pinned: boolean }>(),
     hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
     pan = useRef<
@@ -325,6 +407,54 @@ export function PdfViewer({
     >(undefined);
   const selected = w.blocks.find((b) => b.id === selection?.id),
     blocks = w.blocks.filter((b) => b.documentId === activeId);
+  function openAnnotation(id: string) {
+    setAnnotationId(id);
+    setNotesOpen(true);
+    setSelection(undefined);
+    setTextSelection(undefined);
+  }
+  async function createAnnotation(
+    kind: Annotation["kind"],
+    source = textSelection,
+    chosenColor = color,
+  ) {
+    if (!source || addingRef.current) return;
+    addingRef.current = true;
+    setAdding(true);
+    try {
+      const id = await addAnnotation(source, kind, chosenColor);
+      window.getSelection()?.removeAllRanges();
+      setTextSelection(undefined);
+      if (kind !== "highlight") openAnnotation(id);
+      else toast("已保存螢光標記");
+      if (kind === "translation" || kind === "summary") void runAnnotation(id);
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      addingRef.current = false;
+      setAdding(false);
+    }
+  }
+  useEffect(() => {
+    if (!root || view.mode !== "select" || noteMode || !activeId) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const capture = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => setTextSelection(captureTextSelection(root, w.pages, activeId)),
+        100,
+      );
+    };
+    document.addEventListener("selectionchange", capture);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("selectionchange", capture);
+    };
+  }, [root, w.pages, activeId, view.mode, noteMode]);
+  useEffect(() => {
+    setTextSelection(undefined);
+    window.getSelection()?.removeAllRanges();
+  }, [view.zoom, view.rotation, activeId]);
   const close = useCallback(() => {
     setSelection((current) => {
       if (current?.pinned)
@@ -340,6 +470,7 @@ export function PdfViewer({
     setPdf(undefined);
     setError("");
     setSelection(undefined);
+    setAnnotationId(undefined);
     setQuery("");
     setView(readView(activeId || ""));
     let cancelled = false;
@@ -523,7 +654,11 @@ export function PdfViewer({
             className={`icon-button ${view.mode === "select" ? "active" : ""}`}
             aria-label="選字模式"
             aria-pressed={view.mode === "select"}
-            onClick={() => setView((v) => ({ ...v, mode: "select" }))}
+            onClick={() => {
+              setPen(false);
+              setNoteMode(false);
+              setView((v) => ({ ...v, mode: "select" }));
+            }}
           >
             <MousePointer2 size={16} />
           </button>
@@ -531,11 +666,68 @@ export function PdfViewer({
             className={`icon-button ${view.mode === "pan" ? "active" : ""}`}
             aria-label="手掌模式"
             aria-pressed={view.mode === "pan"}
-            onClick={() => setView((v) => ({ ...v, mode: "pan" }))}
+            onClick={() => {
+              setPen(false);
+              setNoteMode(false);
+              setTextSelection(undefined);
+              setView((v) => ({ ...v, mode: "pan" }));
+            }}
           >
             <Hand size={16} />
           </button>
         </div>
+        <i className="divider" />
+        <button
+          className={`icon-button ${pen ? "active" : ""}`}
+          aria-label="螢光筆模式"
+          aria-pressed={pen}
+          title="選取文字後自動標記"
+          onClick={() => {
+            setPen(!pen);
+            setNoteMode(false);
+            setView((v) => ({ ...v, mode: "select" }));
+          }}
+        >
+          <Highlighter size={16} />
+        </button>
+        <div className="highlighter-palette" aria-label="螢光筆顏色">
+          {annotationColors.map((c) => (
+            <button
+              key={c.id}
+              className={`color-dot annotation-${c.id}`}
+              aria-label={`${c.name}螢光筆`}
+              aria-pressed={color === c.id}
+              onClick={() => {
+                setColor(c.id);
+                setPen(true);
+                setNoteMode(false);
+                setView((v) => ({ ...v, mode: "select" }));
+              }}
+            />
+          ))}
+        </div>
+        <button
+          className={`icon-button ${noteMode ? "active" : ""}`}
+          aria-label="貼上便條貼"
+          aria-pressed={noteMode}
+          title="按下後點 PDF 頁面"
+          onClick={() => {
+            setNoteMode(!noteMode);
+            setPen(false);
+            setTextSelection(undefined);
+            setView((v) => ({ ...v, mode: "select" }));
+          }}
+        >
+          <StickyNote size={16} />
+        </button>
+        <button
+          className={`icon-button ${notesOpen ? "active" : ""}`}
+          aria-label="開啟我的標註"
+          aria-pressed={notesOpen}
+          onClick={() => setNotesOpen(!notesOpen)}
+        >
+          <NotebookPen size={16} />
+        </button>
         <i className="divider" />
         <button
           className="icon-button"
@@ -669,88 +861,219 @@ export function PdfViewer({
             {w}
           </div>
         ))}
-      <div
-        ref={setRoot}
-        className={`pdf-scroll mode-${view.mode}`}
-        onPointerDown={(e) => {
-          if (
-            view.mode === "pan" &&
-            e.button === 0 &&
-            !(e.target as HTMLElement).closest("button,summary")
-          ) {
-            pan.current = {
-              x: e.clientX,
-              y: e.clientY,
-              left: e.currentTarget.scrollLeft,
-              top: e.currentTarget.scrollTop,
-            };
-            e.currentTarget.setPointerCapture(e.pointerId);
-            e.preventDefault();
-          }
-        }}
-        onPointerMove={(e) => {
-          if (pan.current) {
-            e.currentTarget.scrollLeft =
-              pan.current.left + pan.current.x - e.clientX;
-            e.currentTarget.scrollTop =
-              pan.current.top + pan.current.y - e.clientY;
-          }
-        }}
-        onPointerUp={() => {
-          pan.current = undefined;
-        }}
-        onPointerCancel={() => {
-          pan.current = undefined;
-        }}
-      >
-        {error ? (
-          <div className="missing-file">
-            <FileUp size={32} />
-            <h3>補回 PDF，接續閱讀</h3>
-            <p>{error}</p>
-            <button className="primary-button" onClick={onImport}>
-              補回原始 PDF
-            </button>
-            <div className="text-results">
-              {blocks.map((b) => (
-                <button key={b.id} onClick={() => open(b.id)}>
-                  <b>
-                    p. {b.pageIndex + 1} · 段落 {b.order + 1}
-                  </b>
-                  <p>{validResult(w, b)?.text || b.normalizedText}</p>
-                </button>
-              ))}
+      {noteMode && (
+        <div className="annotation-hint">
+          點一下 PDF 頁面放置便條貼。
+          <button className="text-button" onClick={() => setNoteMode(false)}>
+            取消
+          </button>
+        </div>
+      )}
+      <div className="reader-content">
+        <div
+          ref={setRoot}
+          className={`pdf-scroll mode-${view.mode} ${noteMode ? "mode-note" : ""} ${pen ? "mode-highlight" : ""}`}
+          onPointerDown={(e) => {
+            if (
+              noteMode &&
+              e.button === 0 &&
+              !(e.target as HTMLElement).closest("button,summary")
+            ) {
+              const page = (e.target as HTMLElement).closest<HTMLElement>(
+                ".pdf-page.ready",
+              );
+              const layout = w.pages.find(
+                (p) =>
+                  p.documentId === activeId &&
+                  p.pageIndex === Number(page?.dataset.pageIndex),
+              );
+              if (page?.dataset.viewport && layout && activeId) {
+                e.preventDefault();
+                const bounds = page.getBoundingClientRect();
+                const p = unprojectPoint(
+                  [e.clientX - bounds.left, e.clientY - bounds.top],
+                  layout,
+                  JSON.parse(page.dataset.viewport),
+                );
+                const quad: Quad = [
+                  p,
+                  [Math.min(1, p[0] + 0.015), p[1]],
+                  [Math.min(1, p[0] + 0.015), Math.min(1, p[1] + 0.015)],
+                  [p[0], Math.min(1, p[1] + 0.015)],
+                ];
+                setNoteMode(false);
+                void createAnnotation("note", {
+                  documentId: activeId,
+                  quote: "",
+                  anchors: [{ pageIndex: layout.pageIndex, quads: [quad] }],
+                });
+              }
+              return;
+            }
+            if (
+              view.mode === "pan" &&
+              e.button === 0 &&
+              !(e.target as HTMLElement).closest("button,summary")
+            ) {
+              pan.current = {
+                x: e.clientX,
+                y: e.clientY,
+                left: e.currentTarget.scrollLeft,
+                top: e.currentTarget.scrollTop,
+              };
+              e.currentTarget.setPointerCapture(e.pointerId);
+              e.preventDefault();
+            }
+          }}
+          onPointerMove={(e) => {
+            if (pan.current) {
+              e.currentTarget.scrollLeft =
+                pan.current.left + pan.current.x - e.clientX;
+              e.currentTarget.scrollTop =
+                pan.current.top + pan.current.y - e.clientY;
+            }
+          }}
+          onPointerUp={() => {
+            pan.current = undefined;
+            if (
+              pen &&
+              !noteMode &&
+              view.mode === "select" &&
+              root &&
+              activeId
+            ) {
+              const source = captureTextSelection(root, w.pages, activeId);
+              if (source) void createAnnotation("highlight", source);
+            }
+          }}
+          onPointerCancel={() => {
+            pan.current = undefined;
+          }}
+        >
+          {error ? (
+            <div className="missing-file">
+              <FileUp size={32} />
+              <h3>補回 PDF，接續閱讀</h3>
+              <p>{error}</p>
+              <button className="primary-button" onClick={onImport}>
+                補回原始 PDF
+              </button>
+              <div className="text-results">
+                {blocks.map((b) => (
+                  <button key={b.id} onClick={() => open(b.id)}>
+                    <b>
+                      p. {b.pageIndex + 1} · 段落 {b.order + 1}
+                    </b>
+                    <p>{validResult(w, b)?.text || b.normalizedText}</p>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : pdf ? (
-          Array.from({ length: pdf.numPages }, (_, index) => (
-            <PdfPage
-              key={`${paper.id}-${index}`}
-              pdf={pdf}
-              index={index}
-              width={Math.max(160, Math.min(1040, width - 96) * view.zoom)}
-              rotation={view.rotation}
-              layout={w.pages.find(
-                (p) => p.documentId === activeId && p.pageIndex === index,
-              )}
-              blocks={blocks.filter((b) => b.pageIndex === index)}
-              root={root}
-              selected={selected?.id}
-              query={query.trim()}
-              showMarkers={markers}
-              activate={activate}
-              open={open}
-              preview={preview}
-              leave={leave}
-            />
-          ))
-        ) : (
-          <div className="loading-state">
-            <LoaderCircle className="spin" />
-            正在開啟文獻…
-          </div>
+          ) : pdf ? (
+            Array.from({ length: pdf.numPages }, (_, index) => (
+              <PdfPage
+                key={`${paper.id}-${index}`}
+                pdf={pdf}
+                index={index}
+                width={Math.max(160, Math.min(1040, width - 96) * view.zoom)}
+                rotation={view.rotation}
+                layout={w.pages.find(
+                  (p) => p.documentId === activeId && p.pageIndex === index,
+                )}
+                blocks={blocks.filter((b) => b.pageIndex === index)}
+                root={root}
+                selected={selected?.id}
+                query={query.trim()}
+                showMarkers={markers}
+                activate={activate}
+                open={open}
+                preview={preview}
+                leave={leave}
+                openAnnotation={openAnnotation}
+              />
+            ))
+          ) : (
+            <div className="loading-state">
+              <LoaderCircle className="spin" />
+              正在開啟文獻…
+            </div>
+          )}
+        </div>
+        {notesOpen && (
+          <AnnotationsPanel
+            documentId={paper.id}
+            selectedId={annotationId}
+            select={setAnnotationId}
+            close={() => setNotesOpen(false)}
+            locate={(a) => {
+              go(a.anchors[0].pageIndex + 1);
+              setAnnotationId(a.id);
+              requestAnimationFrame(() =>
+                root
+                  ?.querySelector(`[data-annotation-pin="${a.id}"]`)
+                  ?.scrollIntoView({ block: "center", inline: "nearest" }),
+              );
+            }}
+          />
         )}
       </div>
+      {textSelection && (
+        <div
+          className="selection-actions"
+          role="toolbar"
+          aria-label="選取文字操作"
+          onPointerDown={(e) => e.preventDefault()}
+        >
+          <span className="selection-excerpt">
+            {textSelection.quote.slice(0, 90)}
+            {textSelection.quote.length > 90 ? "…" : ""}
+          </span>
+          <div className="selection-buttons">
+            {annotationColors.map((c) => (
+              <button
+                disabled={adding}
+                key={c.id}
+                className={`color-dot annotation-${c.id}`}
+                aria-label={`以${c.name}標記選取文字`}
+                onClick={() =>
+                  void createAnnotation("highlight", textSelection, c.id)
+                }
+              />
+            ))}
+            <button
+              disabled={adding}
+              onClick={() => void createAnnotation("note")}
+            >
+              <StickyNote size={14} />
+              便條貼
+            </button>
+            <button
+              disabled={adding}
+              onClick={() => void createAnnotation("summary")}
+            >
+              <Sparkles size={14} />
+              AI 摘要
+            </button>
+            <button
+              disabled={adding}
+              onClick={() => void createAnnotation("translation")}
+            >
+              <Languages size={14} />
+              AI 翻譯
+            </button>
+            <button
+              className="icon-button"
+              aria-label="取消文字選取"
+              onClick={() => {
+                setTextSelection(undefined);
+                window.getSelection()?.removeAllRanges();
+              }}
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+      )}
       {selected && selection && (
         <TranslationPopover
           key={selected.id}

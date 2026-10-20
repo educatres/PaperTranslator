@@ -1,6 +1,6 @@
-# PaperTranslator 研究封裝 v1
+# PaperTranslator 研究封裝 v2
 
-應用識別：`educatres.PaperTranslator`。版本：`schemaVersion: 1`。純文字使用 UTF-8，PDF 保持原始 bytes。
+應用識別：`educatres.PaperTranslator`。版本：`schemaVersion: 2`。純文字使用 UTF-8，PDF 保持原始 bytes。新版本仍接受 v1 研究資料與封裝，驗證後加入空的 annotations 並升級為 v2；不重建段落或譯文。IndexedDB 與快取命名空間保留，避免遺失原有研究。舊版程式不支援 v2 備份。
 
 ```text
 研究名稱.researchpack
@@ -12,7 +12,9 @@
 
 manifest 包含 `appId`、`schemaVersion`、`title`、`exportedAt`、`research: {path, size, sha256}` 及 `documents: [{documentId, path, size, sha256}]`。
 
-research.json 通過 `src/types.ts` 的嚴格 Zod schema，包含 `id`、`epoch`、`revision`、`updatedAt`、`documents`、`pages`、`blocks`、`results`、`summaries` 及 `jobs`。不接受未宣告欄位，沒有憑證欄位。
+research.json 通過 `src/types.ts` 的嚴格 Zod schema，包含 `id`、`epoch`、`revision`、`updatedAt`、`documents`、`pages`、`blocks`、`results`、`summaries`、`jobs` 及 `annotations`。不接受未宣告欄位，沒有憑證欄位。
+
+annotations 保存 `id`、`documentId`、`documentHash`、`kind`（highlight/note/translation/summary）、`color`（yellow/green/blue/pink）、`anchors: [{pageIndex, quads}]`、`quote`、`sourceHash`、`content`、`status`、可選 config、results 歷史版本及建立／更新時間。四角座標沿用段落的未旋轉 0–1 座標，從當前文字層 Range 經 viewport 反轉換取得，每頁分開保存。文字標記及選取 AI 保留原文 SHA-256，頁面便條可使用空 quote。便條不改寫原始 PDF；匯入驗證文件 hash、頁碼、色彩、來源 hash、狀態與結果結構。匯出／還原將生成中的標註改為 paused，需由使用者手動重試。
 
 文件以原始 PDF SHA-256 識別。段落識別碼為以下 UTF-8 字串的 SHA-256：
 

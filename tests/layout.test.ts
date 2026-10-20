@@ -5,7 +5,7 @@ import {
   normalizeParagraph,
   type TextRun,
 } from "../src/lib/layout";
-import { projectPoint } from "../src/lib/geometry";
+import { projectPoint, unprojectPoint } from "../src/lib/geometry";
 const meta = {
   width: 600,
   height: 800,
@@ -173,6 +173,23 @@ describe("annotated layout boundaries", () => {
   });
 });
 describe("CropBox and rotation projection", () => {
+  it("keeps selected text coordinates stable through inverse display transforms", () => {
+    for (const display of [
+      [2, 0, 0, -2, -40, 1660],
+      [0, 1, 1, 0, -30, -20],
+      [-1, 0, 0, 1, 620, -30],
+      [0, -1, -1, 0, 830, 620],
+    ]) {
+      const original: [number, number] = [0.27, 0.63];
+      const point = unprojectPoint(
+        projectPoint(original, meta, display),
+        meta,
+        display,
+      );
+      expect(point[0]).toBeCloseTo(original[0], 8);
+      expect(point[1]).toBeCloseTo(original[1], 8);
+    }
+  });
   it("maps normalized corners through PDF coordinates for all four rotations", () => {
     expect(projectPoint([0.2, 0.3], meta, [2, 0, 0, -2, -40, 1660])).toEqual([
       240, 480,

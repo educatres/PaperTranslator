@@ -5,7 +5,8 @@ import {
   now,
   uid,
   usesReasoningEffort,
-  workspaceSchema,
+  workspaceInputSchema,
+  upgradeWorkspace,
   type Workspace,
 } from "../types";
 import { sha256 } from "./hash";
@@ -29,7 +30,7 @@ const fileMeta = z
 const manifestSchema = z
   .object({
     appId: z.literal(APP_ID),
-    schemaVersion: z.literal(1),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
     title: z.string().max(200),
     exportedAt: z.string(),
     research: z
@@ -47,13 +48,14 @@ function unique(values: string[], name: string) {
     throw new Error(`${name} 包含重複 ID。`);
 }
 export async function validateWorkspace(input: unknown): Promise<Workspace> {
-  const w = workspaceSchema.parse(input);
+  const w = workspaceInputSchema.parse(input);
   for (const key of [
     "documents",
     "blocks",
     "results",
     "summaries",
     "jobs",
+    "annotations",
   ] as const)
     unique(
       w[key].map((x) => x.id),
@@ -73,6 +75,41 @@ export async function validateWorkspace(input: unknown): Promise<Workspace> {
   const pages = new Map(
     w.pages.map((p) => [`${p.documentId}:${p.pageIndex}`, p]),
   );
+  for (const a of w.annotations) {
+    const doc = docs.get(a.documentId);
+    if (
+      !doc ||
+      doc.sha256 !== a.documentHash ||
+      a.anchors.some(
+        (anchor) =>
+          anchor.pageIndex >= doc.pageCount ||
+          !pages.has(`${doc.id}:${anchor.pageIndex}`),
+      ) ||
+      (await sha256(a.quote)) !== a.sourceHash
+    )
+      throw new Error("標註來源或位置無效。");
+    unique(
+      a.anchors.map((anchor) => String(anchor.pageIndex)),
+      "標註頁面",
+    );
+    const ai = a.kind === "translation" || a.kind === "summary";
+    if (
+      (!ai && (a.results.length || a.config || a.status !== "idle")) ||
+      (a.kind !== "note" && !a.quote.trim()) ||
+      (ai && a.quote.length > 6000) ||
+      (ai && a.status !== "idle" && !a.config) ||
+      (ai && a.status === "complete" && !a.results.length) ||
+      (a.config &&
+        !usesReasoningEffort(a.config.provider) &&
+        a.config.reasoningEffort) ||
+      a.results.some(
+        (r) =>
+          !r.text.trim() ||
+          (!usesReasoningEffort(r.provider) && r.reasoningEffort),
+      )
+    )
+      throw new Error("標註內容或生成狀態無效。");
+  }
   for (const p of w.pages) {
     const d = docs.get(p.documentId);
     if (!d || p.pageIndex >= d.pageCount) throw new Error("無效頁碼。");
@@ -261,7 +298,9 @@ export async function validateWorkspace(input: unknown): Promise<Workspace> {
   return w;
 }
 export function pausedSnapshot(w: Workspace) {
-  const next = structuredClone(w);
+  const next = structuredClone(upgradeWorkspace(w));
+  for (const a of next.annotations)
+    if (a.status === "running") a.status = "paused";
   for (const j of next.jobs) {
     delete j.owner;
     delete j.heartbeat;
@@ -309,7 +348,7 @@ export async function exportPack(): Promise<Blob> {
     "manifest.json",
     JSON.stringify({
       appId: APP_ID,
-      schemaVersion: 1,
+      schemaVersion: 2,
       title: w.title,
       exportedAt: now(),
       research: {
@@ -469,9 +508,10 @@ export async function readImport(file: File): Promise<ImportData> {
     (await sha256(research)) !== manifest.research.sha256
   )
     throw new Error("研究資料校驗失敗。");
-  const workspace = await validateWorkspace(
-    JSON.parse(new TextDecoder().decode(research)),
-  );
+  const rawResearch = JSON.parse(new TextDecoder().decode(research));
+  if (rawResearch.schemaVersion !== manifest.schemaVersion)
+    throw new Error("manifest 與研究資料的版本不符。");
+  const workspace = await validateWorkspace(rawResearch);
   if (
     manifest.documents.length !== workspace.documents.length ||
     manifest.title !== workspace.title
@@ -536,6 +576,15 @@ export function markdown(w: Workspace) {
     const summary = w.summaries.find((s) => s.id === d.currentSummaryId);
     if (summary)
       out += `### 全文摘要\n\n${summary.text}\n\n${summary.provider} / ${summary.model} · ${summary.createdAt}\n\n`;
+    for (const a of w.annotations.filter((a) => a.documentId === d.id)) {
+      const labels = {
+        highlight: "螢光標記",
+        note: "便條貼",
+        translation: "選取翻譯",
+        summary: "選取摘要",
+      };
+      out += `### ${labels[a.kind]} · ${a.color} · p. ${a.anchors.map((anchor) => anchor.pageIndex + 1).join(", ")}\n\n${a.quote ? `原文：${a.quote}\n\n` : ""}${a.content ? a.content + "\n\n" : ""}${a.results.at(-1)?.text || ""}\n\n`;
+    }
     for (const b of w.blocks
       .filter((b) => b.documentId === d.id)
       .sort((a, b) => a.pageIndex - b.pageIndex || a.order - b.order)) {

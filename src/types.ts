@@ -187,10 +187,44 @@ export const summarySchema = aiResultSchema
   })
   .strict();
 export type DocumentSummary = z.infer<typeof summarySchema>;
+export const annotationColorSchema = z.enum([
+  "yellow",
+  "green",
+  "blue",
+  "pink",
+]);
+export type AnnotationColor = z.infer<typeof annotationColorSchema>;
+export const anchorSchema = z
+  .object({
+    pageIndex: z.number().int().nonnegative(),
+    quads: z.array(quadSchema).min(1).max(5000),
+  })
+  .strict();
+export type AnnotationAnchor = z.infer<typeof anchorSchema>;
+export const annotationSchema = z
+  .object({
+    id,
+    documentId: id,
+    documentHash: hash,
+    kind: z.enum(["highlight", "note", "translation", "summary"]),
+    color: annotationColorSchema,
+    anchors: z.array(anchorSchema).min(1).max(100),
+    quote: z.string().max(50000),
+    sourceHash: hash,
+    content: z.string().max(50000),
+    status: z.enum(["idle", "running", "complete", "failed", "paused"]),
+    config: configSchema.optional(),
+    results: z.array(aiResultSchema).max(1000),
+    error: z.string().max(1000).optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type Annotation = z.infer<typeof annotationSchema>;
 export const workspaceSchema = z
   .object({
     appId: z.literal(APP_ID),
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     id,
     title: z.string().min(1).max(200),
     epoch: id,
@@ -202,12 +236,26 @@ export const workspaceSchema = z
     results: z.array(translationResultSchema).max(500000),
     summaries: z.array(summarySchema).max(10000),
     jobs: z.array(jobSchema).max(10000),
+    annotations: z.array(annotationSchema).max(50000),
   })
   .strict();
 export type Workspace = z.infer<typeof workspaceSchema>;
+export const workspaceInputSchema = z.union([
+  workspaceSchema,
+  workspaceSchema
+    .omit({ annotations: true })
+    .extend({ schemaVersion: z.literal(1) })
+    .strict()
+    .transform((w) => ({ ...w, schemaVersion: 2 as const, annotations: [] })),
+]);
+export function upgradeWorkspace(w: Workspace): Workspace {
+  return (w as { schemaVersion: number }).schemaVersion === 1
+    ? workspaceInputSchema.parse(w)
+    : w;
+}
 export const emptyWorkspace = (): Workspace => ({
   appId: APP_ID,
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: uid(),
   title: "我的論文研究",
   epoch: uid(),
@@ -219,6 +267,7 @@ export const emptyWorkspace = (): Workspace => ({
   results: [],
   summaries: [],
   jobs: [],
+  annotations: [],
 });
 export interface Preferences {
   provider: Provider;

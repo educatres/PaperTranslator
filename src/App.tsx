@@ -123,7 +123,7 @@ function ExportDialog({ close }: { close: () => void }) {
             "pack",
             FileArchive,
             "完整研究封裝",
-            "原始 PDF、段落位置、譯文、摘要與進度。",
+            "原始 PDF、段落、譯文、摘要、螢光標記與便條貼。",
             ".researchpack · 可完整還原",
           ],
           [
@@ -467,7 +467,7 @@ function Help({ close }: { close: () => void }) {
           [
             "02",
             "依自己的步調翻譯",
-            "將滑鼠移到段旁圖示可預覽既有譯文，點擊可固定展開。只有按「翻譯此段」或確認全文任務才會呼叫 AI。跨頁、跨欄段落各自翻譯。",
+            "將滑鼠移到段旁圖示可預覽既有譯文，點擊可固定展開。只有按「翻譯此段」、選取文字的 AI 操作或確認全文任務才會呼叫 AI。跨頁、跨欄段落各自翻譯。",
           ],
           [
             "03",
@@ -486,6 +486,11 @@ function Help({ close }: { close: () => void }) {
           ],
           [
             "06",
+            "把想法留在原文旁",
+            "用黃、淺綠、淺藍、粉紅螢光筆選取重點；按便條貼再點 PDF 可輸入筆記。一般選字後也能按 AI 摘要或 AI 翻譯，結果保存在「我的標註」。標註可定位、改色、刪除，並隨研究封裝備份。",
+          ],
+          [
+            "07",
             "安心保存",
             "資料只留在本機；清除瀏覽器網站資料會刪除研究，請定期備份。API 金鑰只在目前分頁記憶體，重新整理即清除。首次完整快取後可離線閱讀已保存內容。",
           ],
@@ -1031,7 +1036,8 @@ function AppContent() {
                 incoming.workspace.blocks.filter((b) => !b.currentResultId)
                   .length
               }{" "}
-              段未完成 · {incoming.workspace.summaries.length} 份摘要
+              段未完成 · {incoming.workspace.summaries.length} 份摘要 ·{" "}
+              {incoming.workspace.annotations.length} 則標註
             </p>
             {incoming.warnings.map((s) => (
               <p className="warning" key={s}>

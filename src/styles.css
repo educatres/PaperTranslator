@@ -835,6 +835,349 @@ small {
   flex-direction: column;
   position: relative;
 }
+.reader-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+.reader-content > .pdf-scroll {
+  min-width: 0;
+}
+.annotation-yellow {
+  --mark: #ffe369;
+  --note: #fffbea;
+  --mark-border: #cfb24c;
+}
+.annotation-green {
+  --mark: #a7df9b;
+  --note: #f1faed;
+  --mark-border: #86b778;
+}
+.annotation-blue {
+  --mark: #a1d8f4;
+  --note: #eef8fe;
+  --mark-border: #79abc5;
+}
+.annotation-pink {
+  --mark: #f3afce;
+  --note: #fff0f6;
+  --mark-border: #cb8ba8;
+}
+.highlighter-palette,
+.annotation-colors {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 0 5px;
+}
+.color-dot {
+  width: 26px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  flex-shrink: 0;
+  position: relative;
+}
+.color-dot:before {
+  content: "";
+  position: absolute;
+  inset: 5px 4px;
+  background: var(--mark);
+  border: 1px solid var(--mark-border);
+  border-radius: 50%;
+}
+.color-dot[aria-pressed="true"] {
+  border-color: #688762;
+  background: #edf3e5;
+}
+.manual-highlight {
+  position: absolute;
+  pointer-events: none;
+  background: var(--mark);
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+  border-radius: 1px;
+}
+.user-annotation-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  width: 24px;
+  height: 25px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  border: 1px solid var(--mark-border);
+  background: var(--note);
+  color: #54674e;
+  z-index: 6;
+}
+.pdf-scroll.mode-note,
+.pdf-scroll.mode-note * {
+  cursor: copy;
+}
+.pdf-scroll.mode-note .textLayer {
+  pointer-events: none;
+}
+.mode-highlight .textLayer span {
+  cursor: text;
+}
+.annotation-hint {
+  background: #fffbea;
+  padding: 7px 20px;
+  font-size: 11px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.annotations-panel {
+  width: 315px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: #f7f8f2;
+}
+.annotations-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--line);
+  background: #fafbf7;
+  flex-shrink: 0;
+}
+.annotations-panel > header > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.annotations-panel > header b {
+  font-size: 10px;
+  color: #94a288;
+}
+.annotation-cards {
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+}
+.annotation-empty {
+  padding: 15px 8px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: #89967b;
+}
+.annotation-card {
+  background: var(--note);
+  border: 1px solid #dde3d4;
+  border-left: 3px solid var(--mark-border);
+  border-radius: 7px;
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 3px 10px #344b2510;
+}
+.annotation-card.selected {
+  outline: 1px solid var(--mark-border);
+}
+.annotation-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 2px 0 10px;
+}
+.annotation-card-heading strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.annotation-card-heading span {
+  font-size: 9px;
+  color: #87937c;
+}
+.annotation-card blockquote {
+  font:
+    11px/1.8 Georgia,
+    "Microsoft JhengHei",
+    serif;
+  color: #7c8971;
+  margin: 0 0 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--mark-border);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.annotation-card blockquote.collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.annotation-text,
+.annotation-result {
+  font-size: 12px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.annotation-generation {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.annotation-generation small {
+  display: block;
+  font-size: 9px;
+  color: #87937c;
+  margin: 8px 0;
+}
+.annotation-history {
+  border-top: 1px solid #dce4d2;
+  padding-top: 8px;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+.annotation-colors {
+  padding: 8px 0;
+}
+.annotation-card footer {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #d8dfcf;
+}
+.annotation-card footer .small-button,
+.annotation-card footer > .text-button {
+  margin-left: auto;
+  font-size: 10px;
+}
+.note-editor textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.9;
+  padding: 8px;
+  border: 1px solid var(--mark-border);
+  border-radius: 4px;
+  background: #ffffff88;
+  color: #526448;
+}
+.note-save {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 7px 0;
+  gap: 8px;
+  font-size: 9px;
+  color: #87937c;
+}
+.note-save .text-button {
+  font-size: 10px;
+}
+.selection-actions {
+  position: absolute;
+  z-index: 20;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(570px, calc(100% - 24px));
+  background: #fffef9;
+  border: 1px solid #bbcdb0;
+  border-radius: 9px;
+  padding: 11px 13px;
+  box-shadow: 0 5px 25px #304c3430;
+}
+.selection-excerpt {
+  display: block;
+  font:
+    11px/1.6 Georgia,
+    "Microsoft JhengHei",
+    serif;
+  color: #839077;
+  max-height: 36px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.selection-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.selection-buttons > button:not(.color-dot) {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 6px;
+  border-radius: 4px;
+}
+.selection-buttons > button:hover {
+  background: #edf2e5;
+}
+@media (max-width: 700px) {
+  .annotations-panel {
+    position: absolute;
+    z-index: 14;
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 62%;
+    border: 1px solid #ccd9bf;
+    border-radius: 10px;
+    box-shadow: 0 -4px 25px #355c4b22;
+  }
+  .color-dot {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .color-dot:before {
+    inset: 12px;
+  }
+  .selection-buttons > button {
+    min-height: 44px;
+  }
+  .user-annotation-pin {
+    width: 44px;
+    height: 44px;
+    border-width: 0;
+    background: transparent;
+  }
+  .user-annotation-pin:before {
+    content: "";
+    position: absolute;
+    inset: 11px;
+    background: var(--note);
+    border: 1px solid var(--mark-border);
+    border-radius: 5px;
+    z-index: -1;
+  }
+  .annotation-cards {
+    padding: 10px;
+  }
+  .selection-actions {
+    bottom: 9px;
+    padding: 9px;
+  }
+}
 .pdf-toolbar {
   min-height: 45px;
   display: flex;

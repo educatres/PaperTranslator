@@ -7,6 +7,7 @@ import {
   now,
   providerSchema,
   uid,
+  upgradeWorkspace,
   type Preferences,
   type Workspace,
 } from "../types";
@@ -108,7 +109,7 @@ export async function refresh() {
   if (useApp.getState().unsavedDraft) return;
   if (record)
     useApp.setState((s) => ({
-      workspace: record.data,
+      workspace: upgradeWorkspace(record.data),
       activeId: record.data.documents.some((d) => d.id === s.activeId)
         ? s.activeId
         : record.data.documents[0]?.id,
@@ -135,8 +136,9 @@ export async function mutate(
       db.research,
       db.files,
       async () => {
-        const current =
-          (await db.research.get("workspace"))?.data || emptyWorkspace();
+        const current = upgradeWorkspace(
+          (await db.research.get("workspace"))?.data || emptyWorkspace(),
+        );
         if (epoch && current.epoch !== epoch)
           throw new Error("研究空間已變更，這次操作已停止。");
         edit(current);
@@ -178,6 +180,8 @@ export async function replaceWorkspace(
           for (const p of job.parts)
             if (p.status === "running") p.status = "pending";
         }
+      for (const annotation of next.annotations)
+        if (annotation.status === "running") annotation.status = "paused";
       await db.transaction("rw", db.research, db.files, async () => {
         await db.files.clear();
         await db.files.bulkPut(files);
@@ -197,7 +201,9 @@ export async function removeDocument(id: string) {
     async (lock) => {
       if (!lock) throw new Error("請先暫停目前執行的 AI 任務，再移除文獻。");
       const w = await db.transaction("rw", db.files, db.research, async () => {
-        const data = (await db.research.get("workspace"))!.data;
+        const data = upgradeWorkspace(
+          (await db.research.get("workspace"))!.data,
+        );
         const blockIds = new Set(
           data.blocks.filter((b) => b.documentId === id).map((b) => b.id),
         );
@@ -207,6 +213,7 @@ export async function removeDocument(id: string) {
         data.results = data.results.filter((r) => !blockIds.has(r.blockId));
         data.jobs = data.jobs.filter((j) => j.documentId !== id);
         data.summaries = data.summaries.filter((s) => s.documentId !== id);
+        data.annotations = data.annotations.filter((a) => a.documentId !== id);
         data.epoch = uid();
         data.revision++;
         data.updatedAt = now();
@@ -234,9 +241,16 @@ export function initialize() {
         async (lock) => {
           if (!lock) return;
           if (
-            useApp.getState().workspace.jobs.some((j) => j.status === "running")
+            useApp
+              .getState()
+              .workspace.jobs.some((j) => j.status === "running") ||
+            useApp
+              .getState()
+              .workspace.annotations.some((a) => a.status === "running")
           )
             await mutate((w) => {
+              for (const a of w.annotations)
+                if (a.status === "running") a.status = "paused";
               for (const j of w.jobs)
                 if (j.status === "running") {
                   j.status = "paused";
